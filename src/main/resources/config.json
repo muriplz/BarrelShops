@@ -1,0 +1,7 @@
+{
+  "db-url": "jdbc:mysql://HOST:PORT/DB_NAME",
+  "db-user": "USER",
+  "db-password": "PASSWORD",
+  "c1": "The balance a new player starts with",
+  "onboarding-balance": 10
+}
