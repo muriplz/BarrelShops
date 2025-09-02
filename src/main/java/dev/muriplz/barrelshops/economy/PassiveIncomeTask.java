@@ -1,6 +1,6 @@
 package dev.muriplz.barrelshops.economy;
 
-import dev.muriplz.cmeconomy.config.ConfigReader;
+import dev.muriplz.barrelshops.config.ConfigReader;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.concurrent.Executors;
