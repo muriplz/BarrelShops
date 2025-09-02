@@ -1,10 +1,7 @@
 package dev.muriplz.barrelshops.mixin.economy;
 
 import dev.muriplz.barrelshops.economy.EconomyUtils;
-import dev.muriplz.barrelshops.economy.shops.AdminShop;
-import dev.muriplz.barrelshops.economy.shops.AdminShopApi;
-import dev.muriplz.barrelshops.economy.shops.Shop;
-import dev.muriplz.barrelshops.economy.shops.ShopApi;
+import dev.muriplz.barrelshops.economy.shops.*;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -126,13 +123,14 @@ public abstract class ServerGamePacketListenerImplMixin {
                 return;
             }
 
+            String serializedItem = ItemStackUtils.serialize(item, player.level().registryAccess());
             int count = item.getCount();
 
             if (isAdminShop) {
                 String type = shopLine.equals("[adminbuy]") ? "buy" : "sell";
 
                 AdminShopApi.create(
-                        BuiltInRegistries.ITEM.getKey(item.getItem()).toString(),
+                        serializedItem,
                         count,
                         Integer.parseInt(priceLine),
                         attachedBlockPos.getX(),
@@ -153,7 +151,7 @@ public abstract class ServerGamePacketListenerImplMixin {
 
                 ShopApi.create(
                         player.getUUID().toString(),
-                        BuiltInRegistries.ITEM.getKey(item.getItem()).toString(),
+                        serializedItem,
                         count,
                         Integer.parseInt(priceLine),
                         attachedBlockPos.getX(),

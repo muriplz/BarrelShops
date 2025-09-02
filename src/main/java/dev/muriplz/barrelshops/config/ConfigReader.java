@@ -15,6 +15,8 @@ public class ConfigReader {
     public static String DB_USER;
     public static String DB_PASSWORD;
     public static int ONBOARDING_BALANCE;
+    public static int PASSIVE_INCOME_INTERVAL_MINUTES;
+    public static int PASSIVE_INCOME_AMOUNT;
 
     private ConfigReader() {
     }
@@ -28,6 +30,9 @@ public class ConfigReader {
         DB_USER = configObject.get("db-user").getAsString();
         DB_PASSWORD = configObject.get("db-password").getAsString();
         ONBOARDING_BALANCE = configObject.get("onboarding-balance").getAsInt();
+
+        PASSIVE_INCOME_INTERVAL_MINUTES = configObject.get("passive-income-interval-minutes").getAsInt();
+        PASSIVE_INCOME_AMOUNT = configObject.get("passive-income-amount").getAsInt();
     }
 
     public static String readOrCopyFile(Path path, String exampleFile) throws IOException {

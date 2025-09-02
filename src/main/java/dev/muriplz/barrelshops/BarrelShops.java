@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import dev.muriplz.barrelshops.commands.*;
 import dev.muriplz.barrelshops.config.ConfigReader;
 import dev.muriplz.barrelshops.economy.BalanceApi;
+import dev.muriplz.barrelshops.economy.PassiveIncomeTask;
 import dev.muriplz.barrelshops.storage.Database;
 import dev.muriplz.barrelshops.storage.DatabaseUtils;
 import net.minecraft.commands.CommandSourceStack;
@@ -41,10 +42,13 @@ public class BarrelShops {
         BalanceGiveCommand.register(dispatcher);
         BalanceTopCommand.register(dispatcher);
         PayCommand.register(dispatcher);
+
+        PassiveIncomeTask.start(event.getServer());
     }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent event) {
+        PassiveIncomeTask.stop();
         Database.closeDataSource();
     }
 

@@ -3,14 +3,12 @@ package dev.muriplz.barrelshops.mixin.economy;
 import com.mojang.authlib.GameProfile;
 import dev.muriplz.barrelshops.MinecraftServerSupplier;
 import dev.muriplz.barrelshops.economy.BalanceApi;
+import dev.muriplz.barrelshops.economy.shops.ItemStackUtils;
 import dev.muriplz.barrelshops.economy.shops.Shop;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.WallSignBlock;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
@@ -51,17 +49,21 @@ public class ServerPlayerMixin {
             return;
         }
 
-        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(shop.get().selling()));
+        ItemStack templateItem = ItemStackUtils.deserialize(shop.get().selling(), be.getLevel().registryAccess());
+        if (templateItem.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Shop has invalid item data"));
+            return;
+        }
 
         if (shop.get().type().equals("buy")) {
-            cwmod$handleBuyInteraction(player, shop.get(), item, barrel);
+            cwmod$handleBuyInteraction(player, shop.get(), templateItem, barrel);
         } else {
-            cwmod$handleSellInteraction(player, shop.get(), item, barrel);
+            cwmod$handleSellInteraction(player, shop.get(), templateItem, barrel);
         }
     }
 
     @Unique
-    private void cwmod$handleBuyInteraction(ServerPlayer player, Shop shop, Item item, BarrelBlockEntity barrel) {
+    private void cwmod$handleBuyInteraction(ServerPlayer player, Shop shop, ItemStack templateItem, BarrelBlockEntity barrel) {
         int balance = BalanceApi.getBalance(player.getUUID());
 
         if (balance < shop.price()) {
@@ -72,7 +74,7 @@ public class ServerPlayerMixin {
         int stock = 0;
         for (int i = 0; i < barrel.getContainerSize(); i++) {
             ItemStack itemStack = barrel.getItem(i);
-            if (itemStack.getItem() == item) {
+            if (ItemStack.matches(itemStack, templateItem)) {
                 stock += itemStack.getCount();
             }
         }
@@ -83,7 +85,7 @@ public class ServerPlayerMixin {
         }
 
         if (!player.getInventory().hasAnyMatching(itemStack -> itemStack.isEmpty() ||
-                (itemStack.getItem() == item && itemStack.getCount() + shop.amount() <= itemStack.getMaxStackSize()))) {
+                (ItemStack.matches(itemStack, templateItem) && itemStack.getCount() + shop.amount() <= itemStack.getMaxStackSize()))) {
             player.sendSystemMessage(Component.literal("Your inventory is full"));
             return;
         }
@@ -94,11 +96,14 @@ public class ServerPlayerMixin {
         int given = 0;
         for (int i = 0; i < barrel.getContainerSize() && given < shop.amount(); i++) {
             ItemStack itemStack = barrel.getItem(i);
-            if (itemStack.getItem() == item) {
+            if (ItemStack.matches(itemStack, templateItem)) {
                 int toGive = Math.min(itemStack.getCount(), shop.amount() - given);
                 itemStack.shrink(toGive);
                 given += toGive;
-                player.addItem(new ItemStack(item, toGive));
+
+                ItemStack giveStack = templateItem.copy();
+                giveStack.setCount(toGive);
+                player.addItem(giveStack);
             }
         }
 
@@ -107,22 +112,22 @@ public class ServerPlayerMixin {
                 .map(GameProfile::getName)
                 .orElse("Unknown Player");
 
-        player.sendSystemMessage(Component.literal("You bought " + given + " " + item.getDefaultInstance().getDisplayName().getString() +
+        player.sendSystemMessage(Component.literal("You bought " + given + " " + templateItem.getDisplayName().getString() +
                 " for $" + shop.price() + " from " + owner + "'s shop. Your new balance is: $" + BalanceApi.getBalance(player.getUUID())));
     }
 
     @Unique
-    private void cwmod$handleSellInteraction(ServerPlayer player, Shop shop, Item item, BarrelBlockEntity barrel) {
+    private void cwmod$handleSellInteraction(ServerPlayer player, Shop shop, ItemStack templateItem, BarrelBlockEntity barrel) {
         int playerItems = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
-            if (stack.getItem() == item) {
+            if (ItemStack.matches(stack, templateItem)) {
                 playerItems += stack.getCount();
             }
         }
 
         if (playerItems < shop.amount()) {
-            player.sendSystemMessage(Component.literal("You don't have enough " + item.getDefaultInstance().getDisplayName().getString() + " to sell"));
+            player.sendSystemMessage(Component.literal("You don't have enough " + templateItem.getDisplayName().getString() + " to sell"));
             return;
         }
 
@@ -136,9 +141,9 @@ public class ServerPlayerMixin {
         for (int i = 0; i < barrel.getContainerSize(); i++) {
             ItemStack stack = barrel.getItem(i);
             if (stack.isEmpty()) {
-                space += 64;
-            } else if (stack.getItem() == item) {
-                space += (64 - stack.getCount());
+                space += templateItem.getMaxStackSize();
+            } else if (ItemStack.matches(stack, templateItem)) {
+                space += (templateItem.getMaxStackSize() - stack.getCount());
             }
         }
 
@@ -153,7 +158,7 @@ public class ServerPlayerMixin {
         int removed = 0;
         for (int i = 0; i < player.getInventory().getContainerSize() && removed < shop.amount(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
-            if (stack.getItem() == item) {
+            if (ItemStack.matches(stack, templateItem)) {
                 int toRemove = Math.min(stack.getCount(), shop.amount() - removed);
                 stack.shrink(toRemove);
                 removed += toRemove;
@@ -164,11 +169,13 @@ public class ServerPlayerMixin {
         for (int i = 0; i < barrel.getContainerSize() && toAdd > 0; i++) {
             ItemStack stack = barrel.getItem(i);
             if (stack.isEmpty()) {
-                int amount = Math.min(toAdd, 64);
-                barrel.setItem(i, new ItemStack(item, amount));
+                int amount = Math.min(toAdd, templateItem.getMaxStackSize());
+                ItemStack addStack = templateItem.copy();
+                addStack.setCount(amount);
+                barrel.setItem(i, addStack);
                 toAdd -= amount;
-            } else if (stack.getItem() == item && stack.getCount() < 64) {
-                int amount = Math.min(toAdd, 64 - stack.getCount());
+            } else if (ItemStack.matches(stack, templateItem) && stack.getCount() < templateItem.getMaxStackSize()) {
+                int amount = Math.min(toAdd, templateItem.getMaxStackSize() - stack.getCount());
                 stack.grow(amount);
                 toAdd -= amount;
             }
@@ -179,7 +186,7 @@ public class ServerPlayerMixin {
                 .map(GameProfile::getName)
                 .orElse("Unknown Player");
 
-        player.sendSystemMessage(Component.literal("You sold " + removed + " " + item.getDefaultInstance().getDisplayName().getString() +
+        player.sendSystemMessage(Component.literal("You sold " + removed + " " + templateItem.getDisplayName().getString() +
                 " for $" + shop.price() + " to " + owner + "'s shop. Your new balance is: $" + BalanceApi.getBalance(player.getUUID())));
     }
 }

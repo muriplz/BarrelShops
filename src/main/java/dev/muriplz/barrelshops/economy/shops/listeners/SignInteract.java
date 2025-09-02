@@ -5,14 +5,12 @@ import dev.muriplz.barrelshops.BarrelShops;
 import dev.muriplz.barrelshops.MinecraftServerSupplier;
 import dev.muriplz.barrelshops.economy.BalanceApi;
 import dev.muriplz.barrelshops.economy.shops.AdminShop;
+import dev.muriplz.barrelshops.economy.shops.ItemStackUtils;
 import dev.muriplz.barrelshops.economy.shops.Shop;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.WallSignBlock;
@@ -57,7 +55,6 @@ public class SignInteract {
 
         if (!(level.getBlockEntity(attachedPos) instanceof BarrelBlockEntity barrel)) return;
 
-        // Check for regular shop first
         Optional<Shop> shop = Shop.get(attachedPos, level.dimension().location().toString());
         if (shop.isPresent()) {
             event.setCanceled(true);
@@ -67,27 +64,34 @@ public class SignInteract {
                 return;
             }
 
-            Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(shop.get().selling()));
+            ItemStack templateItem = ItemStackUtils.deserialize(shop.get().selling(), level.registryAccess());
+            if (templateItem.isEmpty()) {
+                player.sendSystemMessage(Component.literal("Shop has invalid item data"));
+                return;
+            }
 
             if (shop.get().type().equals("buy")) {
-                handleBuyShop(player, shop.get(), item, barrel);
+                handleBuyShop(player, shop.get(), templateItem, barrel);
             } else {
-                handleSellShop(player, shop.get(), item, barrel);
+                handleSellShop(player, shop.get(), templateItem, barrel);
             }
             return;
         }
 
-        // Check for admin shop
         Optional<AdminShop> adminShop = AdminShop.getAdminShop(attachedPos, level.dimension().location().toString());
         if (adminShop.isPresent()) {
             event.setCanceled(true);
 
-            Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(adminShop.get().selling()));
+            ItemStack templateItem = ItemStackUtils.deserialize(adminShop.get().selling(), level.registryAccess());
+            if (templateItem.isEmpty()) {
+                player.sendSystemMessage(Component.literal("Admin shop has invalid item data"));
+                return;
+            }
 
             if (adminShop.get().type().equals("buy")) {
-                handleAdminBuyShop(player, adminShop.get(), item);
+                handleAdminBuyShop(player, adminShop.get(), templateItem);
             } else {
-                handleAdminSellShop(player, adminShop.get(), item);
+                handleAdminSellShop(player, adminShop.get(), templateItem);
             }
         }
 
@@ -97,7 +101,7 @@ public class SignInteract {
         }
     }
 
-    private static void handleAdminBuyShop(ServerPlayer player, AdminShop shop, Item item) {
+    private static void handleAdminBuyShop(ServerPlayer player, AdminShop shop, ItemStack templateItem) {
         int balance = BalanceApi.getBalance(player.getUUID());
 
         if (balance < shop.price()) {
@@ -105,46 +109,46 @@ public class SignInteract {
             return;
         }
 
-        // Check inventory space
         if (!player.getInventory().hasAnyMatching(itemStack -> itemStack.isEmpty() ||
-                (itemStack.getItem() == item && itemStack.getCount() + shop.amount() <= itemStack.getMaxStackSize()))) {
+                (ItemStack.matches(itemStack, templateItem) && itemStack.getCount() + shop.amount() <= itemStack.getMaxStackSize()))) {
             player.sendSystemMessage(Component.literal("Your inventory is full"));
             return;
         }
 
-        // Admin shop has unlimited stock, just deduct money and give items
         BalanceApi.giveBalance(player.getUUID(), -shop.price());
-        player.addItem(new ItemStack(item, shop.amount()));
 
-        String itemName = item.getDefaultInstance().getDisplayName().getString().replace("[", "").replace("]", "");
+        ItemStack itemToGive = templateItem.copy();
+        itemToGive.setCount(shop.amount());
+        player.addItem(itemToGive);
+
+        String itemName = templateItem.getDisplayName().getString().replace("[", "").replace("]", "");
 
         player.sendSystemMessage(Component.literal("You bought " + shop.amount() + " " + itemName +
                 " for $" + shop.price() + " from the admin shop. Your new balance is: $" + BalanceApi.getBalance(player.getUUID())));
     }
 
-    private static void handleAdminSellShop(ServerPlayer player, AdminShop shop, Item item) {
+    private static void handleAdminSellShop(ServerPlayer player, AdminShop shop, ItemStack templateItem) {
         int playerItems = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
-            if (stack.getItem() == item) {
+            if (ItemStack.matches(stack, templateItem)) {
                 playerItems += stack.getCount();
             }
         }
 
-        String itemName = item.getDefaultInstance().getDisplayName().getString().replace("[", "").replace("]", "");
+        String itemName = templateItem.getDisplayName().getString().replace("[", "").replace("]", "");
 
         if (playerItems < shop.amount()) {
             player.sendSystemMessage(Component.literal("You don't have enough " + itemName + " to sell"));
             return;
         }
 
-        // Admin shop has unlimited money, just take items and give money
         BalanceApi.giveBalance(player.getUUID(), shop.price());
 
         int removed = 0;
         for (int i = 0; i < player.getInventory().getContainerSize() && removed < shop.amount(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
-            if (stack.getItem() == item) {
+            if (ItemStack.matches(stack, templateItem)) {
                 int toRemove = Math.min(stack.getCount(), shop.amount() - removed);
                 stack.shrink(toRemove);
                 removed += toRemove;
@@ -155,7 +159,7 @@ public class SignInteract {
                 " for $" + shop.price() + " to the admin shop. Your new balance is: $" + BalanceApi.getBalance(player.getUUID())));
     }
 
-    private static void handleBuyShop(ServerPlayer player, Shop shop, Item item, BarrelBlockEntity barrel) {
+    private static void handleBuyShop(ServerPlayer player, Shop shop, ItemStack templateItem, BarrelBlockEntity barrel) {
         int balance = BalanceApi.getBalance(player.getUUID());
 
         if (balance < shop.price()) {
@@ -166,7 +170,7 @@ public class SignInteract {
         int stock = 0;
         for (int i = 0; i < barrel.getContainerSize(); i++) {
             ItemStack itemStack = barrel.getItem(i);
-            if (itemStack.getItem() == item) {
+            if (ItemStack.matches(itemStack, templateItem)) {
                 stock += itemStack.getCount();
             }
         }
@@ -177,7 +181,7 @@ public class SignInteract {
         }
 
         if (!player.getInventory().hasAnyMatching(itemStack -> itemStack.isEmpty() ||
-                (itemStack.getItem() == item && itemStack.getCount() + shop.amount() <= itemStack.getMaxStackSize()))) {
+                (ItemStack.matches(itemStack, templateItem) && itemStack.getCount() + shop.amount() <= itemStack.getMaxStackSize()))) {
             player.sendSystemMessage(Component.literal("Your inventory is full"));
             return;
         }
@@ -188,11 +192,14 @@ public class SignInteract {
         int given = 0;
         for (int i = 0; i < barrel.getContainerSize() && given < shop.amount(); i++) {
             ItemStack itemStack = barrel.getItem(i);
-            if (itemStack.getItem() == item) {
+            if (ItemStack.matches(itemStack, templateItem)) {
                 int toGive = Math.min(itemStack.getCount(), shop.amount() - given);
                 itemStack.shrink(toGive);
                 given += toGive;
-                player.addItem(new ItemStack(item, toGive));
+
+                ItemStack giveStack = templateItem.copy();
+                giveStack.setCount(toGive);
+                player.addItem(giveStack);
             }
         }
 
@@ -201,22 +208,22 @@ public class SignInteract {
                 .map(GameProfile::getName)
                 .orElse("Unknown Player");
 
-        String itemName = item.getDefaultInstance().getDisplayName().getString().replace("[", "").replace("]", "");
+        String itemName = templateItem.getDisplayName().getString().replace("[", "").replace("]", "");
 
         player.sendSystemMessage(Component.literal("You bought " + given + " " + itemName +
                 " for $" + shop.price() + " from " + owner + "'s shop. Your new balance is: $" + BalanceApi.getBalance(player.getUUID())));
     }
 
-    private static void handleSellShop(ServerPlayer player, Shop shop, Item item, BarrelBlockEntity barrel) {
+    private static void handleSellShop(ServerPlayer player, Shop shop, ItemStack templateItem, BarrelBlockEntity barrel) {
         int playerItems = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
-            if (stack.getItem() == item) {
+            if (ItemStack.matches(stack, templateItem)) {
                 playerItems += stack.getCount();
             }
         }
 
-        String itemName = item.getDefaultInstance().getDisplayName().getString().replace("[", "").replace("]", "");
+        String itemName = templateItem.getDisplayName().getString().replace("[", "").replace("]", "");
 
         if (playerItems < shop.amount()) {
             player.sendSystemMessage(Component.literal("You don't have enough " + itemName + " to sell"));
@@ -233,9 +240,9 @@ public class SignInteract {
         for (int i = 0; i < barrel.getContainerSize(); i++) {
             ItemStack stack = barrel.getItem(i);
             if (stack.isEmpty()) {
-                space += 64;
-            } else if (stack.getItem() == item) {
-                space += (64 - stack.getCount());
+                space += templateItem.getMaxStackSize();
+            } else if (ItemStack.matches(stack, templateItem)) {
+                space += (templateItem.getMaxStackSize() - stack.getCount());
             }
         }
 
@@ -250,7 +257,7 @@ public class SignInteract {
         int removed = 0;
         for (int i = 0; i < player.getInventory().getContainerSize() && removed < shop.amount(); i++) {
             ItemStack stack = player.getInventory().getItem(i);
-            if (stack.getItem() == item) {
+            if (ItemStack.matches(stack, templateItem)) {
                 int toRemove = Math.min(stack.getCount(), shop.amount() - removed);
                 stack.shrink(toRemove);
                 removed += toRemove;
@@ -261,11 +268,13 @@ public class SignInteract {
         for (int i = 0; i < barrel.getContainerSize() && toAdd > 0; i++) {
             ItemStack stack = barrel.getItem(i);
             if (stack.isEmpty()) {
-                int amount = Math.min(toAdd, 64);
-                barrel.setItem(i, new ItemStack(item, amount));
+                int amount = Math.min(toAdd, templateItem.getMaxStackSize());
+                ItemStack addStack = templateItem.copy();
+                addStack.setCount(amount);
+                barrel.setItem(i, addStack);
                 toAdd -= amount;
-            } else if (stack.getItem() == item && stack.getCount() < 64) {
-                int amount = Math.min(toAdd, 64 - stack.getCount());
+            } else if (ItemStack.matches(stack, templateItem) && stack.getCount() < templateItem.getMaxStackSize()) {
+                int amount = Math.min(toAdd, templateItem.getMaxStackSize() - stack.getCount());
                 stack.grow(amount);
                 toAdd -= amount;
             }
